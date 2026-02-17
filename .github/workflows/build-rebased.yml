@@ -1,4 +1,4 @@
-name: Build Xiaomi 13 Rebased Kernel (Fixed)
+name: Build Xiaomi 13 Rebased Kernel (Fixed v2)
 
 on:
   workflow_dispatch:
@@ -10,7 +10,6 @@ on:
 
 jobs:
   build:
-    # 修复点 1：使用 ubuntu-24.04 以支持最新的 Clang (GLIBC 2.38+)
     runs-on: ubuntu-24.04
     
     steps:
@@ -20,20 +19,19 @@ jobs:
         ref: staging-lineage-2
         fetch-depth: 1
   
-    - name: 2. 安装基础依赖
+    - name: 2. 安装基础依赖 (适配 Ubuntu 24.04)
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2
+        # 移除了 lib32ncurses5-dev/libncurses5，改用 libncurses-dev 和 lib32ncurses-dev
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2
 
     - name: 3. 修复损坏的 KernelSU 子模块
       run: |
         echo "正在修复 broken submodule..."
-        # 1. 强行删除 build.sh 中导致报错的 submodule 更新命令
-        # 这一步是关键，防止脚本尝试去拉取那个不存在的 commit
+        # 强行绕过 build.sh 中的 git submodule 错误
         sed -i 's/git submodule init && git submodule update/echo "Skipping broken submodule update"/' build.sh
         
-        # 2. 手动拉取官方最新的 KernelSU 代码填补空缺
-        # 既然原版坏了，我们自己去官方仓库拉一个好的放进去
+        # 手动拉取官方 KernelSU
         rm -rf KernelSU
         git clone https://github.com/tiann/KernelSU KernelSU
         echo "✅ KernelSU 手动修复完成"
@@ -65,9 +63,6 @@ jobs:
       run: |
         export PATH=$(pwd)/toolchains/clang/bin:$PATH
         chmod +x build.sh
-        
-        # 显示修改后的 build.sh 确认 submodule 命令已被移除
-        head -n 10 build.sh
         
         echo "=== 开始运行修复后的 build.sh ==="
         bash build.sh
