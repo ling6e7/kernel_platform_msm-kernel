@@ -3,7 +3,6 @@ name: Build Xiaomi 13 Rebased Kernel
 on:
   workflow_dispatch:
     inputs:
-      # 虽然源码自带 KSU，但这里留个选项以便后续扩展
       UPLOAD_NAME:
         description: '固件命名后缀'
         required: true
@@ -17,53 +16,50 @@ jobs:
     - name: 1. 拉取代码 (指定分支 staging-lineage-2)
       uses: actions/checkout@v4
       with:
-        ref: staging-lineage-2  # 强制指定该分支
+        ref: staging-lineage-2
         fetch-depth: 1
   
     - name: 2. 安装基础依赖
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler
-   
-    - name: 自动集成 Re-Kernel (使用 Kernel Modifier)
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq
+
+    # === 关键修改：使用官方插件设置 Java 17 ===
+    - name: 3. 设置 Java 17 环境
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: 4. 自动集成 Re-Kernel
       run: |
-        echo "1. 安装 Java 17 和 jq"
-        sudo apt-get install -y openjdk-17-jre-headless jq
-        
-        echo "2. 自动获取并下载最新的 Modifier.jar"
-        # 使用 GitHub API 自动抓取 modifier tag 下的下载链接
+        echo "自动获取并下载最新的 Modifier.jar"
         ASSET_URL=$(curl -s https://api.github.com/repos/Sakion-Team/Re-Kernel/releases/tags/modifier | jq -r '.assets[0].browser_download_url')
         wget $ASSET_URL -O KernelModifier.jar
         
-        echo "3. 运行内核修改器注入代码"
+        echo "运行内核修改器注入代码..."
+        # 此时 java 命令已经是 Java 17 了
         java -jar KernelModifier.jar     
    
-    - name: 3. 准备编译器 (以防 build.sh 没自带)
+    - name: 5. 准备编译器
       run: |
-        # 很多 build.sh 脚本假设系统里有 Clang，我们先装好 Neutron Clang 最保险
         mkdir -p toolchains/clang
         cd toolchains/clang
         curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
         chmod +x antman
         ./antman -S
         
-    - name: 4. 执行一键编译脚本
+    - name: 6. 执行一键编译脚本
       run: |
-        # 将我们下载的 Clang 加入环境变量，防止脚本找不到编译器
         export PATH=$(pwd)/toolchains/clang/bin:$PATH
-        
-        # 赋予脚本执行权限
         chmod +x build.sh
-        
-        echo "=== 开始运行开发者提供的 build.sh ==="
+        echo "=== 开始运行 build.sh ==="
         bash build.sh
 
-    - name: 5. 搜集并上传产物
+    - name: 7. 搜集并上传产物
       uses: actions/upload-artifact@v4
       with:
         name: Kernel-${{ inputs.UPLOAD_NAME }}
-        # 智能匹配：上传所有 zip 文件和 Image 镜像
-        # 通常 build.sh 会在根目录或 out 目录下生成 zip
         path: |
           *.zip
           out/*.zip
