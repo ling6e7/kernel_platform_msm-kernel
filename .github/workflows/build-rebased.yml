@@ -1,0 +1,58 @@
+name: Build Xiaomi 13 Rebased Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      # 虽然源码自带 KSU，但这里留个选项以便后续扩展
+      UPLOAD_NAME:
+        description: '固件命名后缀'
+        required: true
+        default: 'Fuxi-Rebased'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: 1. 拉取代码 (指定分支 staging-lineage-2)
+      uses: actions/checkout@v4
+      with:
+        ref: staging-lineage-2  # 强制指定该分支
+        fetch-depth: 1
+
+    - name: 2. 安装基础依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler
+        
+    - name: 3. 准备编译器 (以防 build.sh 没自带)
+      run: |
+        # 很多 build.sh 脚本假设系统里有 Clang，我们先装好 Neutron Clang 最保险
+        mkdir -p toolchains/clang
+        cd toolchains/clang
+        curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+        chmod +x antman
+        ./antman -S
+        
+    - name: 4. 执行一键编译脚本
+      run: |
+        # 将我们下载的 Clang 加入环境变量，防止脚本找不到编译器
+        export PATH=$(pwd)/toolchains/clang/bin:$PATH
+        
+        # 赋予脚本执行权限
+        chmod +x build.sh
+        
+        echo "=== 开始运行开发者提供的 build.sh ==="
+        bash build.sh
+
+    - name: 5. 搜集并上传产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: Kernel-${{ inputs.UPLOAD_NAME }}
+        # 智能匹配：上传所有 zip 文件和 Image 镜像
+        # 通常 build.sh 会在根目录或 out 目录下生成 zip
+        path: |
+          *.zip
+          out/*.zip
+          AnyKernel3/*.zip
+          out/arch/arm64/boot/Image
