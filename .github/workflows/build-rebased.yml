@@ -1,4 +1,4 @@
-name: Build Xiaomi 13 Rebased Kernel
+name: Build Xiaomi 13 Rebased Kernel (Fixed)
 
 on:
   workflow_dispatch:
@@ -10,10 +10,11 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    # 修复点 1：使用 ubuntu-24.04 以支持最新的 Clang (GLIBC 2.38+)
+    runs-on: ubuntu-24.04
     
     steps:
-    - name: 1. 拉取代码 (指定分支 staging-lineage-2)
+    - name: 1. 拉取代码
       uses: actions/checkout@v4
       with:
         ref: staging-lineage-2
@@ -22,26 +23,37 @@ jobs:
     - name: 2. 安装基础依赖
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2
 
-    # === 关键修改：使用官方插件设置 Java 17 ===
-    - name: 3. 设置 Java 17 环境
+    - name: 3. 修复损坏的 KernelSU 子模块
+      run: |
+        echo "正在修复 broken submodule..."
+        # 1. 强行删除 build.sh 中导致报错的 submodule 更新命令
+        # 这一步是关键，防止脚本尝试去拉取那个不存在的 commit
+        sed -i 's/git submodule init && git submodule update/echo "Skipping broken submodule update"/' build.sh
+        
+        # 2. 手动拉取官方最新的 KernelSU 代码填补空缺
+        # 既然原版坏了，我们自己去官方仓库拉一个好的放进去
+        rm -rf KernelSU
+        git clone https://github.com/tiann/KernelSU KernelSU
+        echo "✅ KernelSU 手动修复完成"
+
+    - name: 4. 设置 Java 17 环境 (为 Re-Kernel 准备)
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: 4. 自动集成 Re-Kernel
+    - name: 5. 自动集成 Re-Kernel
       run: |
-        echo "自动获取并下载最新的 Modifier.jar"
+        echo "下载并运行 Kernel Modifier..."
         ASSET_URL=$(curl -s https://api.github.com/repos/Sakion-Team/Re-Kernel/releases/tags/modifier | jq -r '.assets[0].browser_download_url')
         wget $ASSET_URL -O KernelModifier.jar
         
-        echo "运行内核修改器注入代码..."
-        # 此时 java 命令已经是 Java 17 了
+        # 运行修改器
         java -jar KernelModifier.jar     
    
-    - name: 5. 准备编译器
+    - name: 6. 准备编译器
       run: |
         mkdir -p toolchains/clang
         cd toolchains/clang
@@ -49,14 +61,18 @@ jobs:
         chmod +x antman
         ./antman -S
         
-    - name: 6. 执行一键编译脚本
+    - name: 7. 执行编译
       run: |
         export PATH=$(pwd)/toolchains/clang/bin:$PATH
         chmod +x build.sh
-        echo "=== 开始运行 build.sh ==="
+        
+        # 显示修改后的 build.sh 确认 submodule 命令已被移除
+        head -n 10 build.sh
+        
+        echo "=== 开始运行修复后的 build.sh ==="
         bash build.sh
 
-    - name: 7. 搜集并上传产物
+    - name: 8. 搜集并上传产物
       uses: actions/upload-artifact@v4
       with:
         name: Kernel-${{ inputs.UPLOAD_NAME }}
