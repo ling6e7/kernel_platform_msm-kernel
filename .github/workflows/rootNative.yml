@@ -1,4 +1,4 @@
-name: Build Xiaomi 13 Native-KSU Kernel
+name: Build Xiaomi 13 Native-KSU v3.1.0
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       UPLOAD_NAME:
         description: '固件命名后缀'
         required: true
-        default: 'Fuxi-Native-KSU'
+        default: 'Fuxi-v3.1.0-Native'
 
 jobs:
   build:
@@ -24,53 +24,53 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2
 
-    - name: 3. 清理环境并注入官方 KernelSU
+    - name: 3. 🔥 精准植入 KernelSU v3.1.0 🔥
       run: |
-        echo "=== 正在清理源码中的旧 KSU 引用 ==="
-        # 1. 先把源码里硬编码的 KSU 引用删掉，防止 setup.sh 重复添加或报错
+        echo "=== 正在清理源码旧引用 ==="
+        # 1. 彻底清除源码自带的“坏”引用
         sed -i '/kernelsu\/Kconfig/d' drivers/Kconfig
         sed -i '/kernelsu/d' drivers/Makefile
-        
-        # 2. 绕过 build.sh 的 submodule 更新
+        rm -rf drivers/kernelsu
+        # 绕过 submodule 报错
         sed -i 's/git submodule init && git submodule update/echo "Skipping broken submodule update"/' build.sh
         
-        echo "=== 正在注入官方 KernelSU ==="
-        # 3. 移除可能存在的残留文件夹
-        rm -rf KernelSU
+        echo "=== 正在克隆 KernelSU v3.1.0 ==="
+        # 2. 关键：指定 tag 为 v3.1.0，确保和你的 APP 版本 1:1 匹配
+        git clone --depth=1 --branch v3.1.0 https://github.com/tiann/KernelSU drivers/kernelsu
         
-        # 4. 使用官方脚本一键集成
-        # 这会自动下载最新源码，并正确修改 drivers/Kconfig 和 Makefile
-        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+        echo "=== 手动链接内核源码 ==="
+        # 3. 手动写入编译规则 (最稳的物理连接方式)
+        echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
         
-        echo "✅ KernelSU Native 模式准备就绪"
+        # 4. 手动写入菜单配置 (插在文件末尾)
+        sed -i '$d' drivers/Kconfig
+        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+        echo 'endmenu' >> drivers/Kconfig
+        
+        echo "✅ KernelSU v3.1.0 源码植入完成"
 
-    - name: 4. 强制修改内核配置 (Root 核心开关)
+    - name: 4. 强制开启 Native 配置 (Root 核心)
       run: |
-        echo "=== 正在强制修改 Defconfig ==="
-        
-        # 自动寻找配置文件
+        echo "=== 正在修改 Defconfig ==="
         DEFCONFIG=$(find arch/arm64/configs -name "*fuxi_defconfig" | head -n 1)
         if [ -z "$DEFCONFIG" ]; then DEFCONFIG="arch/arm64/configs/vendor/fuxi_defconfig"; fi
-        echo "目标配置文件: $DEFCONFIG"
         
-        # 1. 清理可能冲突的配置
+        # 1. 清理旧配置
         sed -i '/CONFIG_KPROBES/d' $DEFCONFIG
         sed -i '/CONFIG_HAVE_KPROBES/d' $DEFCONFIG
         sed -i '/CONFIG_KSU/d' $DEFCONFIG
         sed -i '/CONFIG_OVERLAY_FS/d' $DEFCONFIG
         
-        # 2. 写入 Native 模式所需的黄金配置
+        # 2. 写入 Native v3.1.0 所需配置
+        # CONFIG_KSU=y : 开启 Native 模式 (这就是你想要的！)
         cat <<EOT >> $DEFCONFIG
-        # 开启 Kprobes (Root 必须)
         CONFIG_KPROBES=y
         CONFIG_HAVE_KPROBES=y
-        # 开启 Native 模式 (直接集成，无需修补镜像)
         CONFIG_KSU=y
-        # 模块挂载支持
         CONFIG_OVERLAY_FS=y
         EOT
         
-        echo "=== 配置文件修改完成 ==="
+        echo "=== 配置修改完成 ==="
         tail -n 10 $DEFCONFIG
 
     - name: 5. 设置 Java 17 (Re-Kernel)
