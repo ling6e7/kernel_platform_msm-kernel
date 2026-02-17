@@ -1,4 +1,4 @@
-name: Build Xiaomi 13 LKM-Ready Kernel
+name: Build Xiaomi 13 LKM-Ready Kernel (Final v6)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       UPLOAD_NAME:
         description: '固件命名后缀'
         required: true
-        default: 'Fuxi-LKM-Ready'
+        default: 'Fuxi-LKM-Pure'
 
 jobs:
   build:
@@ -24,12 +24,22 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2
 
-    - name: 3. 绕过子模块错误 (不注入 KSU，保持纯净)
+    - name: 3. 🔥 关键修复：移除源码中的 KSU 硬编码 🔥
       run: |
-        echo "跳过子模块更新..."
+        echo "正在清理 drivers/Kconfig 和 Makefile..."
+        
+        # 1. 解决 drivers/Kconfig:239 报错
+        # 删掉 source "drivers/kernelsu/Kconfig" 这一行
+        sed -i '/kernelsu\/Kconfig/d' drivers/Kconfig
+        
+        # 2. 防止 Makefile 报错
+        # 删掉 obj-$(CONFIG_KSU) += kernelsu/ 这一行
+        sed -i '/kernelsu/d' drivers/Makefile
+        
+        # 3. 绕过 submodule 更新
         sed -i 's/git submodule init && git submodule update/echo "Skipping broken submodule update"/' build.sh
-        # 注意：这里我们故意不下载 KernelSU 源码，也不运行 setup.sh
-        # 因为我们要编译的是纯净内核，把 KSU 留给 APP 去挂载 LKM
+        
+        echo "✅ 源码已净化，编译器将不再寻找 KernelSU"
 
     - name: 4. 强制开启 LKM 必要支持 (KProbes & OverlayFS)
       run: |
@@ -41,7 +51,7 @@ jobs:
         sed -i '/CONFIG_KPROBES/d' $DEFCONFIG
         sed -i '/CONFIG_HAVE_KPROBES/d' $DEFCONFIG
         sed -i '/CONFIG_OVERLAY_FS/d' $DEFCONFIG
-        # ⚠️ 关键：确保 CONFIG_KSU 被删除，保证内核纯净
+        # ⚠️ 确保 CONFIG_KSU 被删除
         sed -i '/CONFIG_KSU/d' $DEFCONFIG
         
         # 2. 写入 LKM 必须的“接口”配置
@@ -61,7 +71,7 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: 6. 集成 Re-Kernel (依然推荐保留这个优化)
+    - name: 6. 集成 Re-Kernel
       run: |
         ASSET_URL=$(curl -s https://api.github.com/repos/Sakion-Team/Re-Kernel/releases/tags/modifier | jq -r '.assets[0].browser_download_url')
         wget $ASSET_URL -O KernelModifier.jar
