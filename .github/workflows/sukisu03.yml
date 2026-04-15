@@ -1,0 +1,118 @@
+name: Build Xiaomi 13 Fuxi LKM-Ready Kernel (SukiSU Ultra - Builtin)
+
+on:
+  workflow_dispatch:
+    inputs:
+      UPLOAD_NAME:
+        description: '固件命名后缀'
+        required: true
+        default: 'Fuxi-LKM-SukiSU-Builtin'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+  
+    steps:
+    - name: 1. 拉取代码（跳过子模块）
+      uses: actions/checkout@v4
+      with:
+        ref: staging-lineage-2
+        fetch-depth: 1
+        submodules: false
+
+    - name: 2. 安装基础依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2
+
+    - name: 3. 🔥 超级彻底清理旧 KernelSU 子模块（本次加强版） 🔥
+      run: |
+        echo "=== 开始超级清理 ==="
+        rm -rf KernelSU drivers/kernelsu .git/modules/KernelSU 2>/dev/null || true
+        git submodule deinit --all -f 2>/dev/null || true
+        
+        # 彻底删除 .gitmodules 中的 KernelSU 条目
+        sed -i '/KernelSU/d' .gitmodules 2>/dev/null || true
+        sed -i '/\[submodule "KernelSU"\]/,+2d' .gitmodules 2>/dev/null || true
+        
+        # 彻底删除 drivers/Kconfig 中的 kernelsu 引用
+        sed -i '/kernelsu\/Kconfig/d' drivers/Kconfig 2>/dev/null || true
+        sed -i '/source.*kernelsu/d' drivers/Kconfig 2>/dev/null || true
+        
+        # 删除 drivers/Makefile 中的 kernelsu 引用
+        sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
+        
+        # 彻底禁用 build.sh 中的 submodule 命令（改成无害的 true）
+        sed -i 's/git submodule init && git submodule update/true || true/' build.sh
+        
+        echo "✅ 超级清理完成"
+        echo "=== 检查清理结果 ==="
+        grep -i kernelsu drivers/Kconfig drivers/Makefile .gitmodules build.sh || echo "已无 kernelsu 残留"
+
+    - name: 4. 强制开启 LKM + SukiSU 必要配置
+      run: |
+        echo "修改 fuxi_defconfig..."
+        DEFCONFIG="arch/arm64/configs/fuxi_defconfig"
+        
+        sed -i '/CONFIG_KSU/d' $DEFCONFIG
+        sed -i '/CONFIG_KPROBES/d' $DEFCONFIG
+        sed -i '/CONFIG_HAVE_KPROBES/d' $DEFCONFIG
+        sed -i '/CONFIG_OVERLAY_FS/d' $DEFCONFIG
+        sed -i '/CONFIG_KALLSYMS/d' $DEFCONFIG
+        
+        cat <<EOT >> $DEFCONFIG
+        CONFIG_KPROBES=y
+        CONFIG_HAVE_KPROBES=y
+        CONFIG_KPROBE_EVENTS=y
+        CONFIG_OVERLAY_FS=y
+        CONFIG_MODULES=y
+        CONFIG_KALLSYMS=y
+        CONFIG_KALLSYMS_ALL=y
+        CONFIG_KPM=y
+        EOT
+        
+        echo "=== defconfig 修改完成 ==="
+        tail -n 20 $DEFCONFIG
+
+    - name: 5. 集成 SukiSU-Ultra Builtin 模式（推荐 non-GKI）
+      run: |
+        echo "集成 SukiSU-Ultra Builtin 最新版..."
+        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin 1
+        echo "✅ SukiSU-Ultra Builtin 集成完成"
+
+    - name: 6. 设置 Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: 7. (可选) Re-Kernel Modifier（已知会失败，可暂时注释掉）
+      run: |
+        ASSET_URL=$(curl -s https://api.github.com/repos/Sakion-Team/Re-Kernel/releases/tags/modifier | jq -r '.assets[0].browser_download_url' || echo "")
+        if [ -n "$ASSET_URL" ]; then
+          wget "$ASSET_URL" -O KernelModifier.jar && java -jar KernelModifier.jar || echo "Re-Kernel 跳过（binder_alloc.c 不匹配）"
+        fi
+
+    - name: 8. 准备 Neutron Clang
+      run: |
+        mkdir -p toolchains/clang
+        cd toolchains/clang
+        curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+        chmod +x antman
+        ./antman -S
+
+    - name: 9. 执行编译 + 最终检查
+      run: |
+        export PATH=$(pwd)/toolchains/clang/bin:$PATH
+        chmod +x build.sh
+        bash build.sh
+        echo "=== 最终检查 Image 中 SukiSU 痕迹 ==="
+        strings out/arch/arm64/boot/Image | grep -iE "suki|ksu|kpm" | head -30 || echo "警告：Image 中完全没有 SukiSU 字符串！"
+
+    - name: 10. 上传产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: Kernel-${{ inputs.UPLOAD_NAME }}
+        path: |
+          out/arch/arm64/boot/Image
+          AnyKernel3/*.zip
