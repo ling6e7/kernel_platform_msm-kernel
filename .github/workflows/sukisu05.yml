@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
-  
+
     steps:
     - name: 1. 拉取代码（跳过子模块）
       uses: actions/checkout@v4
@@ -35,29 +35,29 @@ jobs:
         sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
         
         cat > build.sh << 'EOF'
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export TARGET_PRODUCT=fuxi
-        
-        echo "Submodule skipped by workflow"
-        
-        MAKE_PARAMS="LLVM=1 LLVM_IAS=1 LD=ld.lld O=out"
-        make $MAKE_PARAMS fuxi_defconfig -j$(nproc --all)
-        make $MAKE_PARAMS Image -j$(nproc --all)
-        
-        if [ $? -ne 0 ]
-        then
-            exit 1
-        fi
-        
-        rm -r out/AnyKernel3 2>/dev/null || true
-        cp -r AnyKernel3 out/
-        cp out/arch/arm64/boot/Image out/AnyKernel3/Image
-        cd out/AnyKernel3
-        zip -r9 fuxi-$(/bin/date -u '+%Y%m%d-%H%M').zip .
-        EOF
-                chmod +x build.sh
-                echo "✅ 终极清理完成，build.sh 已重写并指定 LD=ld.lld"
+export ARCH=arm64
+export SUBARCH=arm64
+export TARGET_PRODUCT=fuxi
+
+echo "Submodule skipped by workflow"
+
+MAKE_PARAMS="LLVM=1 LLVM_IAS=1 LD=ld.lld O=out"
+make $MAKE_PARAMS fuxi_defconfig -j$(nproc --all)
+make $MAKE_PARAMS Image -j$(nproc --all)
+
+if [ $? -ne 0 ]
+then
+    exit 1
+fi
+
+rm -r out/AnyKernel3 2>/dev/null || true
+cp -r AnyKernel3 out/
+cp out/arch/arm64/boot/Image out/AnyKernel3/Image
+cd out/AnyKernel3
+zip -r9 fuxi-$(/bin/date -u '+%Y%m%d-%H%M').zip .
+EOF
+        chmod +x build.sh
+        echo "✅ 终极清理完成，build.sh 已重写并指定 LD=ld.lld"
 
     - name: 4. 强制开启 LKM + SukiSU 必要配置
       run: |
