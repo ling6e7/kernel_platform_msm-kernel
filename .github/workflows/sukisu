@@ -1,0 +1,106 @@
+name: Build Xiaomi 13 LKM-Ready Kernel (Final v6 - SukiSU Ultra)
+
+on:
+  workflow_dispatch:
+    inputs:
+      UPLOAD_NAME:
+        description: '固件命名后缀'
+        required: true
+        default: 'Fuxi-LKM-SukiSU'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+   
+    steps:
+    - name: 1. 拉取代码
+      uses: actions/checkout@v4
+      with:
+        ref: staging-lineage-2
+        fetch-depth: 1
+ 
+    - name: 2. 安装基础依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2
+
+    - name: 3. 🔥 清理旧 KSU/Re-Kernel 残留 🔥
+      run: |
+        echo "正在清理旧 KernelSU/Re-Kernel 痕迹..."
+        sed -i '/kernelsu\/Kconfig/d' drivers/Kconfig 2>/dev/null || true
+        sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
+        sed -i 's/git submodule init && git submodule update/echo "Skipping submodule update"/' build.sh 2>/dev/null || true
+        rm -rf drivers/kernelsu KernelSU Re-Kernel 2>/dev/null || true
+        echo "✅ 旧 SU 痕迹已清除"
+
+    - name: 4. 强制开启 LKM 必要配置 (KProbes / OverlayFS / Kallsyms)
+      run: |
+        echo "正在修改 defconfig 支持 LKM + SukiSU..."
+        DEFCONFIG=$(find arch/arm64/configs -name "*fuxi_defconfig" | head -n 1)
+        if [ -z "$DEFCONFIG" ]; then 
+          DEFCONFIG="arch/arm64/configs/vendor/fuxi_defconfig"
+        fi
+       
+        # 清理旧配置
+        sed -i '/CONFIG_KSU/d' $DEFCONFIG
+        sed -i '/CONFIG_KPROBES/d' $DEFCONFIG
+        sed -i '/CONFIG_HAVE_KPROBES/d' $DEFCONFIG
+        sed -i '/CONFIG_OVERLAY_FS/d' $DEFCONFIG
+        sed -i '/CONFIG_KALLSYMS/d' $DEFCONFIG
+       
+        # 写入 SukiSU 非GKI + LKM 必须配置
+        cat <<EOT >> $DEFCONFIG
+        CONFIG_KPROBES=y
+        CONFIG_HAVE_KPROBES=y
+        CONFIG_KPROBE_EVENTS=y
+        CONFIG_OVERLAY_FS=y
+        CONFIG_MODULES=y
+        CONFIG_KALLSYMS=y
+        CONFIG_KALLSYMS_ALL=y
+        CONFIG_KPM=y
+        EOT
+       
+        echo "=== defconfig 修改完成 ==="
+        tail -n 15 $DEFCONFIG
+
+    - name: 5. 集成最新 SukiSU-Ultra (LKM Main 分支)
+      run: |
+        echo "正在集成 SukiSU-Ultra 最新版 (LKM mode)..."
+        # 使用 SukiSU-Ultra 官方最新 setup.sh，LKM main 分支
+        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main 1
+        echo "✅ SukiSU-Ultra 集成完成"
+
+    - name: 6. 设置 Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    # 如果你还想保留 Re-Kernel 的其他 modifier 功能，可以保留这一步；否则可删除
+    - name: 7. (可选) 运行 Re-Kernel Modifier
+      run: |
+        ASSET_URL=$(curl -s https://api.github.com/repos/Sakion-Team/Re-Kernel/releases/tags/modifier | jq -r '.assets[0].browser_download_url')
+        wget $ASSET_URL -O KernelModifier.jar || echo "Re-Kernel 下载失败，跳过"
+        java -jar KernelModifier.jar || echo "Re-Kernel 执行跳过"
+
+    - name: 8. 准备编译器 (Neutron/Clang)
+      run: |
+        mkdir -p toolchains/clang
+        cd toolchains/clang
+        curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+        chmod +x antman
+        ./antman -S
+
+    - name: 9. 执行编译
+      run: |
+        export PATH=$(pwd)/toolchains/clang/bin:$PATH
+        chmod +x build.sh
+        bash build.sh
+
+    - name: 10. 上传产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: Kernel-${{ inputs.UPLOAD_NAME }}
+        path: |
+          out/arch/arm64/boot/Image
+          AnyKernel3/*.zip
