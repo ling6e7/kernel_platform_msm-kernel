@@ -13,101 +13,100 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - name: 1. 拉取代码（跳过子模块）
-      uses: actions/checkout@v4
-      with:
-        ref: staging-lineage-2
-        fetch-depth: 1
-        submodules: false
+      - name: 1. 拉取代码（跳过子模块）
+        uses: actions/checkout@v4
+        with:
+          ref: staging-lineage-2
+          fetch-depth: 1
+          submodules: false
 
-    - name: 2. 安装基础依赖 + LLVM 链接器 lld
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2 lld
+      - name: 2. 安装基础依赖 + LLVM 链接器 lld
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2 lld
 
-    - name: 3. 🔥 终极清理 + 重写 build.sh（已防缩进坑）
-      run: |
-        echo "=== 终极清理开始 ==="
-        rm -f .gitmodules
-        rm -rf KernelSU drivers/kernelsu .git/modules/KernelSU 2>/dev/null || true
-        sed -i '/kernelsu/d' drivers/Kconfig 2>/dev/null || true
-        sed -i '/source.*kernelsu/d' drivers/Kconfig 2>/dev/null || true
-        sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
+      - name: 3. 🔥 终极清理 + 重写 build.sh（已防缩进坑）
+        run: |
+          echo "=== 终极清理开始 ==="
+          rm -f .gitmodules
+          rm -rf KernelSU drivers/kernelsu .git/modules/KernelSU 2>/dev/null || true
+          sed -i '/kernelsu/d' drivers/Kconfig 2>/dev/null || true
+          sed -i '/source.*kernelsu/d' drivers/Kconfig 2>/dev/null || true
+          sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
 
-        # 逐行写入 build.sh（彻底避免 heredoc 缩进问题）
-        cat > build.sh << 'EOF'
-export ARCH=arm64
-export SUBARCH=arm64
-export TARGET_PRODUCT=fuxi
+          # 逐行写入 build.sh（彻底避免 heredoc 缩进问题）
+          cat > build.sh << 'EOF'
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export TARGET_PRODUCT=fuxi
 
-echo "Submodule skipped by workflow"
+          echo "Submodule skipped by workflow"
 
-MAKE_PARAMS="LLVM=1 LLVM_IAS=1 LD=ld.lld O=out"
-make $MAKE_PARAMS fuxi_defconfig -j$(nproc --all)
-make $MAKE_PARAMS Image -j$(nproc --all)
+          MAKE_PARAMS="LLVM=1 LLVM_IAS=1 LD=ld.lld O=out"
+          make $MAKE_PARAMS fuxi_defconfig -j$(nproc --all)
+          make $MAKE_PARAMS Image -j$(nproc --all)
 
-if [ $? -ne 0 ]
-then
-    exit 1
-fi
+          if [ $? -ne 0 ]; then
+              exit 1
+          fi
 
-rm -r out/AnyKernel3 2>/dev/null || true
-cp -r AnyKernel3 out/
-cp out/arch/arm64/boot/Image out/AnyKernel3/Image
-cd out/AnyKernel3
-zip -r9 fuxi-$(/bin/date -u '+%Y%m%d-%H%M').zip .
-EOF
+          rm -r out/AnyKernel3 2>/dev/null || true
+          cp -r AnyKernel3 out/
+          cp out/arch/arm64/boot/Image out/AnyKernel3/Image
+          cd out/AnyKernel3
+          zip -r9 fuxi-$(/bin/date -u '+%Y%m%d-%H%M').zip .
+          EOF
 
-        chmod +x build.sh
-        echo "✅ build.sh 已重写完成"
+          chmod +x build.sh
+          echo "✅ build.sh 已重写完成"
 
-    - name: 4. 强制开启 LKM + SukiSU 必要配置
-      run: |
-        echo "修改 fuxi_defconfig..."
-        DEFCONFIG="arch/arm64/configs/fuxi_defconfig"
-        sed -i '/CONFIG_KSU/d' $DEFCONFIG
-        sed -i '/CONFIG_KPROBES/d' $DEFCONFIG
-        sed -i '/CONFIG_HAVE_KPROBES/d' $DEFCONFIG
-        sed -i '/CONFIG_OVERLAY_FS/d' $DEFCONFIG
-        sed -i '/CONFIG_KALLSYMS/d' $DEFCONFIG
-        
-        cat <<EOT >> $DEFCONFIG
-        CONFIG_KPROBES=y
-        CONFIG_HAVE_KPROBES=y
-        CONFIG_KPROBE_EVENTS=y
-        CONFIG_OVERLAY_FS=y
-        CONFIG_MODULES=y
-        CONFIG_KALLSYMS=y
-        CONFIG_KALLSYMS_ALL=y
-        CONFIG_KPM=y
-        EOT
-        echo "=== defconfig 修改完成 ==="
-        tail -n 20 $DEFCONFIG
+      - name: 4. 强制开启 LKM + SukiSU 必要配置
+        run: |
+          echo "修改 fuxi_defconfig..."
+          DEFCONFIG="arch/arm64/configs/fuxi_defconfig"
+          sed -i '/CONFIG_KSU/d' $DEFCONFIG
+          sed -i '/CONFIG_KPROBES/d' $DEFCONFIG
+          sed -i '/CONFIG_HAVE_KPROBES/d' $DEFCONFIG
+          sed -i '/CONFIG_OVERLAY_FS/d' $DEFCONFIG
+          sed -i '/CONFIG_KALLSYMS/d' $DEFCONFIG
+          
+          # 必须使用 echo 追加，防止 yaml 缩进导致配置写入带有前导空格被内核忽略
+          echo "CONFIG_KPROBES=y" >> $DEFCONFIG
+          echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
+          echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
+          echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
+          echo "CONFIG_MODULES=y" >> $DEFCONFIG
+          echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
+          echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
+          echo "CONFIG_KPM=y" >> $DEFCONFIG
+          
+          echo "=== defconfig 修改完成 ==="
+          tail -n 20 $DEFCONFIG
 
-    - name: 5. 集成 SukiSU-Ultra Builtin 模式
-      run: |
-        echo "集成 SukiSU-Ultra Builtin 最新版..."
-        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin 1
-        echo "✅ SukiSU-Ultra Builtin 集成完成"
+      - name: 5. 集成 SukiSU-Ultra Builtin 模式
+        run: |
+          echo "集成 SukiSU-Ultra Builtin 最新版..."
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin 1
+          echo "✅ SukiSU-Ultra Builtin 集成完成"
 
-    - name: 6. 设置 Java 17
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '17'
+      - name: 6. 设置 Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-    - name: 7. 执行编译 + 最终检查
-      run: |
-        export PATH=$(pwd)/toolchains/clang/bin:$PATH
-        chmod +x build.sh
-        bash build.sh
-        echo "=== 最终检查 Image 中 SukiSU 痕迹 ==="
-        strings out/arch/arm64/boot/Image | grep -iE "suki|ksu|kpm" | head -30 || echo "警告：Image 中完全没有 SukiSU 字符串！集成失败"
+      - name: 7. 执行编译 + 最终检查
+        run: |
+          export PATH=$(pwd)/toolchains/clang/bin:$PATH
+          chmod +x build.sh
+          bash build.sh
+          echo "=== 最终检查 Image 中 SukiSU 痕迹 ==="
+          strings out/arch/arm64/boot/Image | grep -iE "suki|ksu|kpm" | head -30 || echo "警告：Image 中完全没有 SukiSU 字符串！集成失败"
 
-    - name: 8. 上传产物
-      uses: actions/upload-artifact@v4
-      with:
-        name: Kernel-${{ inputs.UPLOAD_NAME }}
-        path: |
-          out/arch/arm64/boot/Image
-          AnyKernel3/*.zip
+      - name: 8. 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-${{ inputs.UPLOAD_NAME }}
+          path: |
+            out/arch/arm64/boot/Image
+            out/AnyKernel3/*.zip
