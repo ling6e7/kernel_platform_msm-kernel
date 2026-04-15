@@ -1,4 +1,4 @@
-name: Build Xiaomi 13 Fuxi LKM-Ready Kernel (SukiSU Ultra - Builtin)005
+name: Build Xiaomi 13 Fuxi LKM-Ready Kernel (SukiSU Ultra - Builtin)
 
 on:
   workflow_dispatch:
@@ -20,19 +20,20 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - name: 2. 下载 Android 优化的 Clang 编译器 (Azure-Clang)
-        run: |
-          echo "开始克隆 Clang 编译器..."
-          mkdir -p toolchains
-          # 改用极其稳定的 Azure-Clang (托管在 GitLab，彻底解决 404 和授权报错)
-          git clone --depth=1 https://gitlab.com/Panchajanya1999/azure-clang.git toolchains/clang
-          echo "✅ 编译器下载完成"
-
-      - name: 3. 安装基础依赖
+      - name: 2. 安装基础依赖
         run: |
           sudo apt-get update
-          # 补全了 clang 和 llvm 基础包，以防万一
-          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2 lld clang llvm
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2 lld
+
+      - name: 3. 获取 Neutron Clang (解决 Ubuntu 24.04 兼容问题)
+        run: |
+          echo "使用 Neutron Clang 替代..."
+          mkdir -p toolchains/clang
+          cd toolchains/clang
+          curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+          chmod +x antman
+          ./antman -S
+          echo "✅ Neutron Clang 安装完成"
 
       - name: 4. 🔥 终极清理 + 重写 build.sh
         run: |
@@ -51,7 +52,7 @@ jobs:
 
           echo "Submodule skipped by workflow"
 
-          # 确保使用刚下载的 clang
+          # 引入 Neutron Clang 路径
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
 
           MAKE_PARAMS="LLVM=1 LLVM_IAS=1 O=out"
@@ -110,9 +111,8 @@ jobs:
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
           
-          # 编译前校验一下编译器是否就绪
           echo "编译器版本检查："
-          clang --version || echo "⚠️ Clang 未找到，但将继续尝试..."
+          clang --version
           
           bash build.sh
           
