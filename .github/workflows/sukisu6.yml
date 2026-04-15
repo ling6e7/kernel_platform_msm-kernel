@@ -18,15 +18,27 @@ jobs:
         with:
           ref: staging-lineage-2
           fetch-depth: 1
-          # 将这里的 false 改为 'recursive'，拉取包含 KSU 在内的所有子模块
-          submodules: 'recursive'
+          submodules: false # 必须关掉！不让 Git 自动去找那个删掉的 commit
 
-      - name: 2. 安装基础依赖
+      - name: 2. ⚡ 手动修复 KernelSU 子模块
+        run: |
+          echo "手动拉取作者定制的 KernelSU..."
+          # 删除可能存在的空目录，防止冲突
+          rm -rf KernelSU drivers/kernelsu 2>/dev/null || true
+          
+          # 直接克隆作者指定的仓库的最新代码（绕过那个丢失的历史 commit）
+          git clone --depth=1 https://github.com/xiaomi-sm8550-kernel/KernelSU.git drivers/kernelsu
+          
+          # 做个软链接，防止某些构建脚本找根目录的 KernelSU
+          ln -sf drivers/kernelsu KernelSU
+          echo "✅ 定制版 KernelSU 源码补齐完成"
+
+      - name: 3. 安装基础依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2 lld
 
-      - name: 3. 获取 Neutron Clang (解决编译兼容性)
+      - name: 4. 获取 Neutron Clang
         run: |
           echo "使用 Neutron Clang..."
           mkdir -p toolchains/clang
@@ -36,14 +48,13 @@ jobs:
           ./antman -S
           echo "✅ Neutron Clang 安装完成"
 
-      - name: 4. 编写编译脚本 build.sh
+      - name: 5. 编写编译脚本 build.sh
         run: |
           cat > build.sh << 'EOF'
           export ARCH=arm64
           export SUBARCH=arm64
           export TARGET_PRODUCT=fuxi
 
-          # 引入 Neutron Clang 路径
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
 
           MAKE_PARAMS="LLVM=1 LLVM_IAS=1 O=out"
@@ -62,7 +73,7 @@ jobs:
           EOF
           chmod +x build.sh
 
-      - name: 5. 确保激活源码内置的 KSU 与底层支持
+      - name: 6. 确保激活源码内置的 KSU 与底层支持
         run: |
           echo "修改 fuxi_defconfig..."
           DEFCONFIG="arch/arm64/configs/fuxi_defconfig"
@@ -73,7 +84,6 @@ jobs:
           sed -i '/CONFIG_OVERLAY_FS/d' $DEFCONFIG
           sed -i '/CONFIG_KALLSYMS/d' $DEFCONFIG
           
-          # 写入底层依赖
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
@@ -81,7 +91,6 @@ jobs:
           echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
           
-          # 激活 KSU 及可能存在的 SUSFS
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KSU_SUSFS=y" >> $DEFCONFIG
           echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> $DEFCONFIG
@@ -90,22 +99,21 @@ jobs:
           
           echo "=== defconfig 修改完成 ==="
 
-      - name: 6. 设置 Java 17
+      - name: 7. 设置 Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 7. 执行编译 + 最终检查
+      - name: 8. 执行编译 + 最终检查
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
           bash build.sh
           
           echo "=== 检查 Image 中内置 KSU/SUSFS 痕迹 ==="
-          # 如果源码里带有 ksu 或 susfs，编译后一定能在 Image 里找到特征码
           strings out/arch/arm64/boot/Image | grep -iE "ksu|susfs" | head -30 || echo "警告：Image 中未检测到 KSU 字符串！"
 
-      - name: 8. 上传产物
+      - name: 9. 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-${{ inputs.UPLOAD_NAME }}
