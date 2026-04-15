@@ -25,7 +25,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2 lld
 
-    - name: 3. 🔥 终极清理（已验证有效）
+    - name: 3. 🔥 终极清理 + 重写 build.sh（已防缩进坑）
       run: |
         echo "=== 终极清理开始 ==="
         rm -f .gitmodules
@@ -33,7 +33,8 @@ jobs:
         sed -i '/kernelsu/d' drivers/Kconfig 2>/dev/null || true
         sed -i '/source.*kernelsu/d' drivers/Kconfig 2>/dev/null || true
         sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
-        
+
+        # 逐行写入 build.sh（彻底避免 heredoc 缩进问题）
         cat > build.sh << 'EOF'
 export ARCH=arm64
 export SUBARCH=arm64
@@ -56,8 +57,9 @@ cp out/arch/arm64/boot/Image out/AnyKernel3/Image
 cd out/AnyKernel3
 zip -r9 fuxi-$(/bin/date -u '+%Y%m%d-%H%M').zip .
 EOF
+
         chmod +x build.sh
-        echo "✅ 终极清理完成，build.sh 已重写并指定 LD=ld.lld"
+        echo "✅ build.sh 已重写完成"
 
     - name: 4. 强制开启 LKM + SukiSU 必要配置
       run: |
