@@ -72,12 +72,12 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: 7. (可选) Re-Kernel Modifier
-      run: |
-        ASSET_URL=$(curl -s https://api.github.com/repos/Sakion-Team/Re-Kernel/releases/tags/modifier | jq -r '.assets[0].browser_download_url' || echo "")
-        if [ -n "$ASSET_URL" ]; then
-          wget "$ASSET_URL" -O KernelModifier.jar && java -jar KernelModifier.jar || echo "Re-Kernel 跳过"
-        fi
+#    - name: 7. (可选) Re-Kernel Modifier
+#      run: |
+#        ASSET_URL=$(curl -s https://api.github.com/repos/Sakion-Team/Re-Kernel/releases/tags/modifier | jq -r '.assets[0].browser_download_url' || echo "")
+#        if [ -n "$ASSET_URL" ]; then
+#          wget "$ASSET_URL" -O KernelModifier.jar && java -jar KernelModifier.jar || echo "Re-Kernel 跳过"
+ #       fi
 
     - name: 8. 准备 Neutron Clang
       run: |
