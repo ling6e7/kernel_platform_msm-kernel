@@ -18,20 +18,26 @@ jobs:
         with:
           ref: staging-lineage-2
           fetch-depth: 1
-          submodules: false # 必须关掉！不让 Git 自动去找那个删掉的 commit
+          submodules: false # 继续保持关闭，避开幽灵 commit
 
-      - name: 2. ⚡ 手动修复 KernelSU 子模块
+      - name: 2. ⚡ 精准提取 KernelSU 核心代码
         run: |
-          echo "手动拉取作者定制的 KernelSU..."
-          # 删除可能存在的空目录，防止冲突
+          echo "手动拉取并提取作者定制的 KernelSU..."
+          # 清理历史残留
           rm -rf KernelSU drivers/kernelsu 2>/dev/null || true
           
-          # 直接克隆作者指定的仓库的最新代码（绕过那个丢失的历史 commit）
-          git clone --depth=1 https://github.com/xiaomi-sm8550-kernel/KernelSU.git drivers/kernelsu
+          # 将仓库克隆到一个临时目录
+          git clone --depth=1 https://github.com/xiaomi-sm8550-kernel/KernelSU.git /tmp/KernelSU
           
-          # 做个软链接，防止某些构建脚本找根目录的 KernelSU
-          ln -sf drivers/kernelsu KernelSU
-          echo "✅ 定制版 KernelSU 源码补齐完成"
+          # 核心修复：把 repo 内部的 kernel 文件夹下的内容，精准放到 drivers/kernelsu 里
+          mkdir -p drivers/kernelsu
+          cp -r /tmp/KernelSU/kernel/* drivers/kernelsu/
+          
+          # 将剩余的文件放回根目录，防止某些作者写的奇葩脚本去根目录找文件
+          mv /tmp/KernelSU KernelSU
+          
+          echo "✅ 目录嵌套修复完成，正在验证文件："
+          ls -l drivers/kernelsu/Kconfig || echo "🚨 致命错误：即使剥离了目录，Kconfig 仍不存在！"
 
       - name: 3. 安装基础依赖
         run: |
