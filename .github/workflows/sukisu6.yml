@@ -1,0 +1,113 @@
+name: Build Xiaomi 13 Fuxi Kernel (Source Built-in KSU)
+
+on:
+  workflow_dispatch:
+    inputs:
+      UPLOAD_NAME:
+        description: '固件命名后缀'
+        required: true
+        default: 'Fuxi-Builtin-Native-KSU'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: 1. 拉取代码
+        uses: actions/checkout@v4
+        with:
+          ref: staging-lineage-2
+          fetch-depth: 1
+          submodules: false
+
+      - name: 2. 安装基础依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2 lld
+
+      - name: 3. 获取 Neutron Clang (解决编译兼容性)
+        run: |
+          echo "使用 Neutron Clang..."
+          mkdir -p toolchains/clang
+          cd toolchains/clang
+          curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+          chmod +x antman
+          ./antman -S
+          echo "✅ Neutron Clang 安装完成"
+
+      - name: 4. 编写编译脚本 build.sh
+        run: |
+          cat > build.sh << 'EOF'
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export TARGET_PRODUCT=fuxi
+
+          # 引入 Neutron Clang 路径
+          export PATH=$(pwd)/toolchains/clang/bin:$PATH
+
+          MAKE_PARAMS="LLVM=1 LLVM_IAS=1 O=out"
+          make $MAKE_PARAMS fuxi_defconfig -j$(nproc --all)
+          make $MAKE_PARAMS Image -j$(nproc --all)
+
+          if [ $? -ne 0 ]; then
+              exit 1
+          fi
+
+          rm -r out/AnyKernel3 2>/dev/null || true
+          cp -r AnyKernel3 out/ 2>/dev/null || echo "跳过 AnyKernel3 复制"
+          cp out/arch/arm64/boot/Image out/AnyKernel3/Image 2>/dev/null || true
+          cd out/AnyKernel3 || exit 0
+          zip -r9 fuxi-$(/bin/date -u '+%Y%m%d-%H%M').zip .
+          EOF
+          chmod +x build.sh
+
+      - name: 5. 确保激活源码内置的 KSU 与底层支持
+        run: |
+          echo "修改 fuxi_defconfig..."
+          DEFCONFIG="arch/arm64/configs/fuxi_defconfig"
+          
+          sed -i '/CONFIG_KSU/d' $DEFCONFIG
+          sed -i '/CONFIG_KPROBES/d' $DEFCONFIG
+          sed -i '/CONFIG_HAVE_KPROBES/d' $DEFCONFIG
+          sed -i '/CONFIG_OVERLAY_FS/d' $DEFCONFIG
+          sed -i '/CONFIG_KALLSYMS/d' $DEFCONFIG
+          
+          # 写入底层依赖
+          echo "CONFIG_KPROBES=y" >> $DEFCONFIG
+          echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
+          echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
+          echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
+          echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
+          echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
+          
+          # 激活 KSU 及可能存在的 SUSFS
+          echo "CONFIG_KSU=y" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS=y" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> $DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> $DEFCONFIG
+          
+          echo "=== defconfig 修改完成 ==="
+
+      - name: 6. 设置 Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 7. 执行编译 + 最终检查
+        run: |
+          export PATH=$(pwd)/toolchains/clang/bin:$PATH
+          bash build.sh
+          
+          echo "=== 检查 Image 中内置 KSU/SUSFS 痕迹 ==="
+          # 如果源码里带有 ksu 或 susfs，编译后一定能在 Image 里找到特征码
+          strings out/arch/arm64/boot/Image | grep -iE "ksu|susfs" | head -30 || echo "警告：Image 中未检测到 KSU 字符串！"
+
+      - name: 8. 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-${{ inputs.UPLOAD_NAME }}
+          path: |
+            out/arch/arm64/boot/Image
+            out/AnyKernel3/*.zip
