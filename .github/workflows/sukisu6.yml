@@ -18,7 +18,8 @@ jobs:
         with:
           ref: staging-lineage-2
           fetch-depth: 1
-          submodules: false
+          # 将这里的 false 改为 'recursive'，拉取包含 KSU 在内的所有子模块
+          submodules: 'recursive'
 
       - name: 2. 安装基础依赖
         run: |
