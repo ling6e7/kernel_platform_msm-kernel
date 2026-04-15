@@ -20,12 +20,12 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - name: 2. 下载 Android 优化的 Clang 编译器 (ZyC-Clang)
+      - name: 2. 下载 Android 优化的 Clang 编译器 (Azure-Clang)
         run: |
           echo "开始克隆 Clang 编译器..."
           mkdir -p toolchains
-          # 使用 ZyC-Clang 17 (针对较新 Android 内核兼容性极佳)
-          git clone --depth=1 https://github.com/ZyC-Project/ZyC-Clang.git toolchains/clang
+          # 改用极其稳定的 Azure-Clang (托管在 GitLab，彻底解决 404 和授权报错)
+          git clone --depth=1 https://gitlab.com/Panchajanya1999/azure-clang.git toolchains/clang
           echo "✅ 编译器下载完成"
 
       - name: 3. 安装基础依赖
