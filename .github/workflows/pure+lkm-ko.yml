@@ -1,4 +1,4 @@
-name: Build Xiaomi 13 Fuxi Kernel (LKM KernelSU)
+name: Build pure Xiaomi 13 Fuxi Kernel (LKM KernelSU)
 
 on:
   workflow_dispatch:
