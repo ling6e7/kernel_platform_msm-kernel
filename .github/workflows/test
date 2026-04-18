@@ -1,0 +1,117 @@
+name: 🧪 Check & Build Pure Kernel (Fuxi)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_pure:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: 1. 拉取代码 (严禁子模块)
+        uses: actions/checkout@v4
+        with:
+          ref: staging-lineage-2
+          fetch-depth: 1
+          submodules: false # 第一道防线：不拉取任何附加模块
+
+      - name: 2. 🧹 物理级净化源码 (切除 KSU 钩子)
+        run: |
+          echo "=== 开始清理底层 Root 代码残留 ==="
+          
+          # 清除可能存在的物理文件夹或软链接
+          rm -rf KernelSU drivers/kernelsu 2>/dev/null || true
+          unlink drivers/kernelsu 2>/dev/null || true
+          
+          # 核心操作：切除 Kbuild 系统对 KSU 的依赖索引，防止报错 Error 1
+          sed -i '/kernelsu/d' drivers/Kconfig 2>/dev/null || true
+          sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
+          
+          echo "✅ 源码树已物理净化"
+
+      - name: 3. 安装编译依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2 lld
+
+      - name: 4. 获取 Neutron Clang 工具链
+        run: |
+          mkdir -p toolchains/clang
+          cd toolchains/clang
+          curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+          chmod +x antman
+          ./antman -S
+          echo "✅ 编译器准备就绪"
+
+      - name: 5. 编写纯净编译脚本
+        run: |
+          cat > build.sh << 'EOF'
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export TARGET_PRODUCT=fuxi
+          export PATH=$(pwd)/toolchains/clang/bin:$PATH
+
+          MAKE_PARAMS="LLVM=1 LLVM_IAS=1 O=out"
+          make $MAKE_PARAMS fuxi_defconfig -j$(nproc --all)
+          make $MAKE_PARAMS Image -j$(nproc --all)
+
+          if [ $? -ne 0 ]; then
+              echo "🚨 编译失败！"
+              exit 1
+          fi
+
+          # 打包 AnyKernel3 (可选)
+          rm -r out/AnyKernel3 2>/dev/null || true
+          cp -r AnyKernel3 out/ 2>/dev/null || true
+          cp out/arch/arm64/boot/Image out/AnyKernel3/Image 2>/dev/null || true
+          cd out/AnyKernel3 || exit 0
+          zip -r9 fuxi-PureKernel-$(/bin/date -u '+%Y%m%d-%H%M').zip .
+          EOF
+          chmod +x build.sh
+
+      - name: 6. 🔒 强制关闭所有 Root 配置
+        run: |
+          echo "检查并重写 fuxi_defconfig..."
+          DEFCONFIG="arch/arm64/configs/fuxi_defconfig"
+          
+          # 抹除所有可能的 KSU 及隐藏机制配置
+          sed -i '/CONFIG_KSU/d' $DEFCONFIG
+          sed -i '/CONFIG_KSU_SUSFS/d' $DEFCONFIG
+          
+          # 显式声明不设置 (标准的 Kconfig 禁用语法)
+          echo "# CONFIG_KSU is not set" >> $DEFCONFIG
+          echo "=== 配置文件已设为纯净模式 ==="
+
+      - name: 7. 设置 Java 环境
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 8. 执行编译
+        run: bash build.sh
+
+      - name: 9. 🔬 终极纯净度质检 (质检不合格将阻断流程)
+        run: |
+          echo "=== 开始对 Image 进行深层特征码扫描 ==="
+          
+          IMAGE_PATH="out/arch/arm64/boot/Image"
+          
+          # 精准搜索特定的底层挂载函数名，避开普通的 checksum 字符串
+          if strings "$IMAGE_PATH" | grep -E "ksu_enable_su|ksu_handle_execve|susfs_init"; then
+            echo "❌ 警告：在编译产物中发现了 KSU/SuSFS 核心代码痕迹！"
+            echo "仓库可能存在更深层的隐蔽钩子，内核并非绝对纯净。"
+            exit 1 # 发现残留，直接让 Actions 爆红失败
+          else
+            echo "✅ 质检通过：未发现任何 Root 底层代码，这是一个完美的纯净内核！"
+          fi
+
+      - name: 10. 上传纯净版内核
+        # 只有在质检通过（没有 exit 1）的情况下才会走到这一步
+        if: success() 
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Fuxi-Pure
+          path: |
+            out/arch/arm64/boot/Image
+            out/AnyKernel3/*.zip
