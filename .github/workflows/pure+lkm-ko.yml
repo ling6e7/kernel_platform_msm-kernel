@@ -1,4 +1,4 @@
-name: Build Xiaomi 13 Fuxi (Pure Master)
+name: pureBuild Xiaomi 13 Fuxi (Pure Master)
 
 on:
   workflow_dispatch:
