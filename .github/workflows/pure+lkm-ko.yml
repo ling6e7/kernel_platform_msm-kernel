@@ -107,10 +107,7 @@ jobs:
         run: |
           echo "=== 注入 LKM 模式配置 ==="
           
-          # 确保 Kconfig 允许编译为模块
           sed -i 's/bool/tristate/g' drivers/kernelsu/Kconfig 2>/dev/null || true
-          
-          # 恢复正常的依赖检查（不暴力强加 obj-y，而是按需挂载）
           sed -i 's/obj-y/obj-$(CONFIG_KSU)/g' drivers/Makefile 2>/dev/null || true
           
           if ! grep -q "kernelsu" drivers/Makefile; then
@@ -124,8 +121,13 @@ jobs:
           sed -i '/CONFIG_HAVE_KPROBES/d' $DEFCONFIG
           sed -i '/CONFIG_OVERLAY_FS/d' $DEFCONFIG
           sed -i '/CONFIG_KALLSYMS/d' $DEFCONFIG
+          sed -i '/CONFIG_MODULES/d' $DEFCONFIG
           
-          # 开启底层基础支持 (这些必须是 Built-in)
+          # 🟢 新增：强行开启 Linux 内核的模块总开关
+          echo "CONFIG_MODULES=y" >> $DEFCONFIG
+          echo "CONFIG_MODULE_UNLOAD=y" >> $DEFCONFIG
+          echo "CONFIG_MODVERSIONS=y" >> $DEFCONFIG
+          
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
@@ -133,7 +135,7 @@ jobs:
           echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
           
-          # 核心修改：明确指定将 KSU 编译为模块 (=m)
+          # 指定 KSU 编译为模块 (=m)
           echo "CONFIG_KSU=m" >> $DEFCONFIG
           echo "CONFIG_KSU_SUSFS=m" >> $DEFCONFIG
           
