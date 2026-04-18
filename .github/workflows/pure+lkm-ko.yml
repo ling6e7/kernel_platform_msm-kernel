@@ -1,4 +1,4 @@
-name: Build pure Xiaomi 13 Fuxi Kernel (LKM KernelSU)
+name: Build Xiaomi 13 Fuxi (Pure Master)
 
 on:
   workflow_dispatch:
@@ -6,39 +6,26 @@ on:
       UPLOAD_NAME:
         description: '固件命名后缀'
         required: true
-        default: 'Fuxi-LKM-Module-KSU'
+        default: 'Fuxi-Pure-Kernel'
 
 jobs:
   build:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: 1. 拉取代码 (严禁子模块)
+      - name: 1. 拉取纯净代码
         uses: actions/checkout@v4
         with:
-          ref: staging-lineage-2
+          ref: master
           fetch-depth: 1
-          submodules: false
+          # 因为是纯净分支，无需再担心幽灵子模块冲突
 
-      - name: 2. ⚡ 物理实体化 KernelSU 源码
-        run: |
-          echo "=== 准备 LKM 模块源码 ==="
-          rm -rf KernelSU drivers/kernelsu 2>/dev/null || true
-          unlink drivers/kernelsu 2>/dev/null || true
-          
-          git clone --depth=1 https://github.com/xiaomi-sm8550-kernel/KernelSU.git /tmp/KernelSU_Source
-          
-          mkdir -p drivers/kernelsu
-          cp -r /tmp/KernelSU_Source/kernel/* drivers/kernelsu/
-          mv /tmp/KernelSU_Source KernelSU
-          echo "✅ KSU 源码已物理入列"
-
-      - name: 3. 安装基础依赖
+      - name: 2. 安装编译依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev lib32ncurses-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python3-pip python3-dev device-tree-compiler jq libfuse2 lld
 
-      - name: 4. 获取 Neutron Clang
+      - name: 3. 获取 Neutron Clang 工具链
         run: |
           echo "使用 Neutron Clang..."
           mkdir -p toolchains/clang
@@ -46,116 +33,52 @@ jobs:
           curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
           chmod +x antman
           ./antman -S
-          echo "✅ 工具链就绪"
-
-      - name: 5. 编写内核与模块联合编译脚本
+          echo "✅ Neutron Clang 安装完成"
+          
+      - name: 3.5 官方标准注入 KernelSU
+        run: |
+          echo "在纯净源码上执行官方注入脚本..."
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+          
+          echo "在 fuxi_defconfig 中开启基础依赖..."
+          DEFCONFIG="arch/arm64/configs/fuxi_defconfig"
+          echo "CONFIG_KPROBES=y" >> $DEFCONFIG
+          echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
+          echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
+          
+      - name: 4. 编译纯净内核
         run: |
           cat > build.sh << 'EOF'
           export ARCH=arm64
           export SUBARCH=arm64
           export TARGET_PRODUCT=fuxi
-
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
 
           MAKE_PARAMS="LLVM=1 LLVM_IAS=1 O=out"
           
-          # 1. 生成配置文件
+          # 直接使用官方 defconfig，不作任何追加和篡改
           make $MAKE_PARAMS fuxi_defconfig -j$(nproc --all)
           
-          # 2. 核心：同时编译 Image 和 modules
-          echo "=== 开始编译内核与模块 ==="
-          make $MAKE_PARAMS Image modules -j$(nproc --all)
+          echo "=== 开始编译纯净 Image ==="
+          make $MAKE_PARAMS Image -j$(nproc --all)
 
           if [ $? -ne 0 ]; then
-              echo "🚨 编译失败"
+              echo "🚨 编译失败！"
               exit 1
           fi
 
-          # 提取配置文件供查阅
-          cp out/.config out/config_output.txt 2>/dev/null || true
-
-          # 3. 处理 AnyKernel3 打包逻辑
-          echo "=== 开始打包 AnyKernel3 ==="
+          # 打包 AnyKernel3
           rm -r out/AnyKernel3 2>/dev/null || true
           cp -r AnyKernel3 out/ 2>/dev/null || true
-          
-          # 拷贝 Image
           cp out/arch/arm64/boot/Image out/AnyKernel3/Image 2>/dev/null || true
-          
-          # 准备 LKM 模块层级目录
-          MODULE_DIR="out/AnyKernel3/modules/system/lib/modules"
-          mkdir -p "$MODULE_DIR"
-          
-          # 寻找并提取刚才编译出的新鲜 kernelsu.ko
-          KO_PATH=$(find out/ -name "kernelsu.ko" | head -n 1)
-          if [ -n "$KO_PATH" ]; then
-              cp "$KO_PATH" "$MODULE_DIR/kernelsu.ko"
-              echo "✅ 已成功提取专属 kernelsu.ko 并塞入刷机包"
-              
-              # 自动激活 AK3 脚本的模块注入开关
-              sed -i 's/do.modules=0/do.modules=1/g' out/AnyKernel3/anykernel.sh
-          else
-              echo "❌ 警告：未能找到编译出的 kernelsu.ko！"
-          fi
-
           cd out/AnyKernel3 || exit 0
-          zip -r9 fuxi-$(/bin/date -u '+%Y%m%d-%H%M').zip .
+          zip -r9 fuxi-Pure-$(/bin/date -u '+%Y%m%d-%H%M').zip .
           EOF
           chmod +x build.sh
-
-      - name: 6. 确保 LKM 编译指令与底层配置
-        run: |
-          echo "=== 注入 LKM 模式配置 ==="
-          
-          sed -i 's/bool/tristate/g' drivers/kernelsu/Kconfig 2>/dev/null || true
-          sed -i 's/obj-y/obj-$(CONFIG_KSU)/g' drivers/Makefile 2>/dev/null || true
-          
-          if ! grep -q "kernelsu" drivers/Makefile; then
-            echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
-          fi
-          
-          DEFCONFIG="arch/arm64/configs/fuxi_defconfig"
-          
-          sed -i '/CONFIG_KSU/d' $DEFCONFIG
-          sed -i '/CONFIG_KPROBES/d' $DEFCONFIG
-          sed -i '/CONFIG_HAVE_KPROBES/d' $DEFCONFIG
-          sed -i '/CONFIG_OVERLAY_FS/d' $DEFCONFIG
-          sed -i '/CONFIG_KALLSYMS/d' $DEFCONFIG
-          sed -i '/CONFIG_MODULES/d' $DEFCONFIG
-          
-          # 🟢 新增：强行开启 Linux 内核的模块总开关
-          echo "CONFIG_MODULES=y" >> $DEFCONFIG
-          echo "CONFIG_MODULE_UNLOAD=y" >> $DEFCONFIG
-          echo "CONFIG_MODVERSIONS=y" >> $DEFCONFIG
-          
-          echo "CONFIG_KPROBES=y" >> $DEFCONFIG
-          echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
-          echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
-          echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
-          echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
-          echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
-          
-          # 指定 KSU 编译为模块 (=m)
-          echo "CONFIG_KSU=m" >> $DEFCONFIG
-          echo "CONFIG_KSU_SUSFS=m" >> $DEFCONFIG
-          
-          echo "=== defconfig 修改完成 ==="
-
-      - name: 7. 设置 Java 环境
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: 8. 执行编译
-        run: |
-          export PATH=$(pwd)/toolchains/clang/bin:$PATH
           bash build.sh
 
-      - name: 9. 上传 LKM 组合产物
+      - name: 5. 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-${{ inputs.UPLOAD_NAME }}
-          path: |
-            out/AnyKernel3/*.zip
-            out/config_output.txt
+          path: out/AnyKernel3/*.zip
